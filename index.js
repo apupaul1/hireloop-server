@@ -1,0 +1,171 @@
+import express from "express";
+import cors from "cors";
+import { MongoClient, ObjectId } from "mongodb";
+import "dotenv/config";
+
+const app = express();
+
+app.use(express.json());
+app.use(cors());
+
+const port = process.env.port || 5000;
+
+const client = new MongoClient(process.env.MONGODB_URI);
+
+app.get("/", (req, res) => {
+  res.status(200).json({ message: "Hireloop server is running on" });
+});
+
+export async function connectToMongoDB() {
+  try {
+    await client.connect();
+    console.log("You successfully connected to MongoDB!");
+    app.listen(port, () => {
+      console.log(`Hirelopp server is running on ${port}`);
+    });
+    return client;
+  } catch (err) {
+    console.dir(err);
+  }
+}
+
+const connectedMongoDB = await connectToMongoDB();
+
+const db = connectedMongoDB.db(process.env.DB_NAME);
+const userCollection = db.collection("user");
+const jobCollection = db.collection("jobs");
+const applicationCollection = db.collection("applications");
+
+app.get("/users", async (req, res) => {
+  const cursor = userCollection.find();
+  const result = await cursor.toArray();
+  res.status(200).json(result);
+});
+
+app.post("/jobs", async (req, res) => {
+  const job = req.body;
+
+  job.createdAt = new Date();
+  job.applicants = 0;
+  const deadlineDate = new Date(job.deadline);
+  job.status = job.createdAt < deadlineDate ? "active" : "expired";
+
+  const result = await jobCollection.insertOne(job);
+
+  res.status(201).json(result);
+});
+
+app.get("/jobs", async (req, res) => {
+  let query = {};
+  let sort = {};
+
+  if (req.query.jobType) {
+    query.jobType = req.query.jobType;
+  }
+
+  if (req.query.category) {
+    query.category = req.query.category;
+  }
+
+  if (req.query.isRemote) {
+    query.isRemote = req.query.isRemote === "remote";
+  }
+
+  if (req.query.search) {
+    query.$or = [
+      { title: { $regex: req.query.search, $options: "i" } },
+      { company: { $regex: req.query.search, $options: "i" } },
+      { responsibilities: { $regex: req.query.search, $options: "i" } },
+      { requirements: { $regex: req.query.search, $options: "i" } },
+    ];
+  }
+
+  if (req.query.sortBy) {
+    if (req.query.sortBy === "recent") {
+      sort.createdAt = -1;
+    } else if (req.query.sortBy === "oldest") {
+      sort.createdAt = 1;
+    } else if (req.query.sortBy === "salaryHigh") {
+      sort.maxSalary = -1;
+    } else {
+      sort.maxSalary = 1;
+    }
+  }
+
+  console.log(sort);
+
+  const cursor = jobCollection.find(query);
+  const result = await cursor.sort(sort).toArray();
+  res.status(200).json(result);
+});
+
+app.get("/jobs/:id", async (req, res) => {
+  const id = req.params.id;
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).json({ message: "Invalid job id" });
+  }
+
+  const isExist = await jobCollection.findOne({ _id: new ObjectId(id) });
+
+  if (!isExist) {
+    return res.status(404).json({ message: "Job is not found" });
+  }
+
+  res.status(200).json(isExist);
+});
+
+app.patch("/jobs/:id", async (req, res) => {
+  const id = req.params.id;
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).json({ message: "Invalid job id" });
+  }
+
+  const { _id, createdAt, ...updates } = req.body ?? {};
+
+  const result = await jobCollection.updateOne(
+    { _id: new ObjectId(id) },
+    { $set: updates },
+  );
+
+  if (result.matchedCount === 0) {
+    return res.status(404).json({ message: "Job is not found" });
+  }
+
+  res.status(200).json(result);
+});
+
+app.delete("/jobs/:id", async (req, res) => {
+  const id = req.params.id;
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).json({ message: "Invalid job id" });
+  }
+
+  const isExist = await jobCollection.findOne({ _id: new ObjectId(id) });
+
+  if (!isExist) {
+    return res.status(404).json({ message: "Job is not found" });
+  }
+
+  const result = await jobCollection.deleteOne({ _id: new ObjectId(id) });
+  res.status(200).json(result);
+});
+
+app.post("/applications", async (req, res) => {
+  const application = req.body;
+
+  application.appliedAt = new Date();
+  application.status = "applied";
+
+  const result = await applicationCollection.insertOne(application);
+
+  res.status(201).json(result);
+});
+
+app.get("/applications", async (req, res) => {
+  const cursor = applicationCollection.find();
+  const result = await cursor.toArray();
+  res.status(200).json(result);
+});
