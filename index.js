@@ -92,8 +92,6 @@ app.get("/jobs", async (req, res) => {
     }
   }
 
-  console.log(sort);
-
   const cursor = jobCollection.find(query);
   const result = await cursor.sort(sort).toArray();
   res.status(200).json(result);
@@ -168,4 +166,13 @@ app.get("/applications", async (req, res) => {
   const cursor = applicationCollection.find();
   const result = await cursor.toArray();
   res.status(200).json(result);
+});
+
+app.get("/applications/count", async (req, res) => {
+  const query = {};
+  if (req.query.applicantId) {
+    query.userId = req.query.applicantId;
+  }
+  const result = await applicationCollection.countDocuments(query);
+  res.send({ count: result });
 });
