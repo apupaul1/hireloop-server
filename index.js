@@ -2,6 +2,9 @@ import express from "express";
 import cors from "cors";
 import { MongoClient, ObjectId } from "mongodb";
 import "dotenv/config";
+import Stripe from "stripe";
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 const app = express();
 
@@ -35,10 +38,23 @@ const db = connectedMongoDB.db(process.env.DB_NAME);
 const userCollection = db.collection("user");
 const jobCollection = db.collection("jobs");
 const applicationCollection = db.collection("applications");
+const paymentCollection = db.collection("payments");
 
 app.get("/users", async (req, res) => {
   const cursor = userCollection.find();
   const result = await cursor.toArray();
+  res.status(200).json(result);
+});
+
+app.get("/users/:id/premium", async (req, res) => {
+  const { id } = req.params;
+
+  const query = { _id: new ObjectId(id) };
+
+  const result = await userCollection.findOne(query, {
+    projection: { premium: 1 },
+  });
+
   res.status(200).json(result);
 });
 
@@ -95,6 +111,16 @@ app.get("/jobs", async (req, res) => {
   const cursor = jobCollection.find(query);
   const result = await cursor.sort(sort).toArray();
   res.status(200).json(result);
+});
+
+app.get("/jobs/count", async (req, res) => {
+  const query = {};
+
+  if (req.query.recruiterEmail) {
+    query.recruiterEmail = req.query.recruiterEmail;
+  }
+  const result = await jobCollection.countDocuments(query);
+  res.send({ count: result });
 });
 
 app.get("/jobs/:id", async (req, res) => {
@@ -175,4 +201,53 @@ app.get("/applications/count", async (req, res) => {
   }
   const result = await applicationCollection.countDocuments(query);
   res.send({ count: result });
+});
+
+app.post("/payments/checkout-verify", async (req, res) => {
+  const { sessionId } = req.body;
+
+  if (!sessionId) {
+    return res.send({ success: false, message: "Session ID is required" });
+  }
+
+  const { status, payment_status, customer_email, metadata, payment_intent } =
+    await stripe.checkout.sessions.retrieve(sessionId);
+
+  if (status === "complete" && payment_status === "paid") {
+    const sessionQuery = { sessionId };
+    const existingPayment = await paymentCollection.findOne(sessionQuery);
+    if (existingPayment) {
+      return res.send({ success: false, message: "Payment already verified" });
+    }
+    const payment = {
+      sessionId,
+      status,
+      payment_status,
+      customer_email,
+      userId: metadata.userId,
+      payment_date: new Date(),
+      payment_intent,
+    };
+
+    const result = await paymentCollection.insertOne(payment);
+
+    // update the user table
+    const query = { _id: new ObjectId(metadata.userId) };
+
+    const updatedDoc = {
+      $set: {
+        premium: true,
+      },
+    };
+    const updateResult = await userCollection.updateOne(query, updatedDoc);
+    res.send({ success: true, result, updateResult });
+    return;
+  }
+  res.send({ success: false, message: "Payment verification failed" });
+});
+
+app.get("/payments", async (req, res) => {
+  const cursor = paymentCollection.find();
+  const result = await cursor.toArray();
+  res.status(200).json(result);
 });
