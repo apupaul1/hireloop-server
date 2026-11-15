@@ -87,6 +87,10 @@ app.get("/jobs", async (req, res) => {
     query.isRemote = req.query.isRemote === "remote";
   }
 
+  if (req.query.recruiterEmail) {
+    query.recruiterEmail = req.query.recruiterEmail;
+  }
+
   if (req.query.search) {
     query.$or = [
       { title: { $regex: req.query.search, $options: "i" } },
@@ -189,8 +193,32 @@ app.post("/applications", async (req, res) => {
 });
 
 app.get("/applications", async (req, res) => {
-  const cursor = applicationCollection.find();
+  let query = {};
+
+  if (req.query.applicantId) {
+    query.userId = req.query.applicantId;
+  }
+
+  if (req.query.jobId) {
+    query.jobId = req.query.jobId;
+  }
+
+  const cursor = applicationCollection.find(query);
   const result = await cursor.toArray();
+  res.status(200).json(result);
+});
+
+app.patch("/applications/:id", async (req, res) => {
+  const { id } = req.params;
+  const query = { _id: new ObjectId(id) };
+  const updatedDoc = {
+    $set: {
+      status: req.body.status,
+    },
+  };
+
+  const result = await applicationCollection.updateOne(query, updatedDoc);
+
   res.status(200).json(result);
 });
 
