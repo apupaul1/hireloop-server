@@ -58,6 +58,21 @@ app.get("/users/:id/premium", async (req, res) => {
   res.status(200).json(result);
 });
 
+app.patch("/users/:id", async (req, res) => {
+  const { id } = req.params;
+  const query = { _id: new ObjectId(id) };
+
+  const updatedDoc = {
+    $set: {
+      role: req.body.role,
+    },
+  };
+
+  const result = await userCollection.updateOne(query, updatedDoc);
+
+  res.status(200).json(result);
+});
+
 app.post("/jobs", async (req, res) => {
   const job = req.body;
 
